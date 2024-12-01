@@ -50,52 +50,15 @@ def validate_transaction(data):
     missing_fields = required_fields - data.keys()
     if missing_fields:
         return False, f"Missing required field(s): {', '.join(missing_fields)}"
+    if not isinstance(data["amount"], (int, float)) or data["amount"] <= 0:
+        return False, "Amount must be a positive number."
+    if not isinstance(data["category"], str) or not data["category"].strip():
+        return False, "Category must be a non-empty string."
     try:
         datetime.strptime(data["date"], "%Y-%m-%d")
     except ValueError:
         return False, "Invalid date format. Use YYYY-MM-DD."
     return True, None
-
-
-HTML_TEMPLATE = """
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Personal Finance Tracker</title>
-</head>
-<body>
-    <h1>Personal Finance Tracker</h1>
-    <h2>Transactions</h2>
-    <ul>
-        {% for transaction in transactions %}
-        <li>
-            <strong>${{ transaction[1] }}</strong> ({{ transaction[2] }}) on {{ transaction[3] }}
-            {% if transaction[4] %}
-            - {{ transaction[4] }}
-            {% endif %}
-        </li>
-        {% endfor %}
-    </ul>
-    <h2>Budgets</h2>
-    <ul>
-        {% for budget in budgets %}
-        <li>{{ budget[1] }}: ${{ budget[2] }} limit</li>
-        {% endfor %}
-    </ul>
-    <a href="/generate_report">Generate Report</a>
-</body>
-</html>
-"""
-
-
-@app.route("/")
-def index():
-    """Home page displaying transactions and budgets."""
-    transactions = execute_query("SELECT * FROM transactions", fetch=True)
-    budgets = execute_query("SELECT * FROM budgets", fetch=True)
-    return render_template_string(HTML_TEMPLATE, transactions=transactions, budgets=budgets)
 
 
 @app.route("/transactions", methods=["POST"])
@@ -132,6 +95,8 @@ def add_budget():
     data = request.json
     if "category" not in data or "budget_limit" not in data:
         return jsonify({"error": "Missing required fields"}), 400
+    if not isinstance(data["budget_limit"], (int, float)) or data["budget_limit"] <= 0:
+        return jsonify({"error": "Budget limit must be a positive number."}), 400
     execute_query("""
         INSERT OR REPLACE INTO budgets (category, budget_limit)
         VALUES (?, ?)
