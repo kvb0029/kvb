@@ -1,5 +1,4 @@
 import unittest
-import json
 from pft import app, init_db, DB_FILE
 import os
 
@@ -65,6 +64,7 @@ class TestPersonalFinanceTracker(unittest.TestCase):
         })
         response = self.app.delete("/transactions/1")
         self.assertEqual(response.status_code, 200)
+
 
 if __name__ == "__main__":
     unittest.main()
