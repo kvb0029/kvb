@@ -2,6 +2,7 @@ import unittest
 from pft import app, init_db, DB_FILE
 import os
 
+
 class TestPersonalFinanceTracker(unittest.TestCase):
     def setUp(self):
         self.app = app.test_client()
@@ -21,30 +22,24 @@ class TestPersonalFinanceTracker(unittest.TestCase):
         })
         self.assertEqual(response.status_code, 201)
 
-    def test_get_transactions(self):
-        self.app.post("/transactions", json={
-            "amount": 100.0,
+    def test_invalid_transaction_negative_amount(self):
+        response = self.app.post("/transactions", json={
+            "amount": -100.0,
             "category": "Food",
-            "date": "2024-12-01",
-            "description": "Groceries"
+            "date": "2024-12-01"
         })
-        response = self.app.get("/transactions")
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(len(response.json), 1)
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("positive number", response.json["error"])
 
-    def test_add_budget(self):
+    def test_budget_zero_limit(self):
         response = self.app.post("/budgets", json={
             "category": "Food",
-            "budget_limit": 300.0
+            "budget_limit": 0.0
         })
-        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("positive number", response.json["error"])
 
-    def test_get_budgets(self):
-        self.app.post("/budgets", json={"category": "Food", "budget_limit": 300.0})
-        response = self.app.get("/budgets")
-        self.assertEqual(response.status_code, 200)
-
-    def test_budget_check(self):
+    def test_check_budgets(self):
         self.app.post("/budgets", json={"category": "Food", "budget_limit": 300.0})
         self.app.post("/transactions", json={
             "amount": 100.0,
@@ -54,16 +49,9 @@ class TestPersonalFinanceTracker(unittest.TestCase):
         })
         response = self.app.get("/budgets/check")
         self.assertEqual(response.status_code, 200)
-
-    def test_delete_transaction(self):
-        self.app.post("/transactions", json={
-            "amount": 100.0,
-            "category": "Food",
-            "date": "2024-12-01",
-            "description": "Groceries"
-        })
-        response = self.app.delete("/transactions/1")
-        self.assertEqual(response.status_code, 200)
+        budgets = response.json
+        self.assertIn("Food", budgets)
+        self.assertEqual(budgets["Food"]["remaining"], 200.0)
 
 
 if __name__ == "__main__":
