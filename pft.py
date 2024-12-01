@@ -1,14 +1,15 @@
 from flask import Flask, request, jsonify, render_template_string
 import sqlite3
-import matplotlib.pyplot as plt
 from datetime import datetime
+import matplotlib.pyplot as plt
 
 app = Flask(__name__)
 
-# Database setup
 DB_FILE = "finance_tracker.db"
 
+
 def init_db():
+    """Initialize the database tables."""
     with sqlite3.connect(DB_FILE) as conn:
         cursor = conn.cursor()
         cursor.execute("""
@@ -29,21 +30,33 @@ def init_db():
         """)
         conn.commit()
 
+
 init_db()
 
-# Utility Functions
+
+def execute_query(query, params=(), fetch=False):
+    """Helper function to execute SQL queries."""
+    with sqlite3.connect(DB_FILE) as conn:
+        cursor = conn.cursor()
+        cursor.execute(query, params)
+        if fetch:
+            return cursor.fetchall()
+        conn.commit()
+
+
 def validate_transaction(data):
-    required_fields = ["amount", "category", "date"]
-    for field in required_fields:
-        if field not in data or not data[field]:
-            return False, f"Missing required field: {field}"
+    """Validate transaction input data."""
+    required_fields = {"amount", "category", "date"}
+    missing_fields = required_fields - data.keys()
+    if missing_fields:
+        return False, f"Missing required field(s): {', '.join(missing_fields)}"
     try:
         datetime.strptime(data["date"], "%Y-%m-%d")
     except ValueError:
         return False, "Invalid date format. Use YYYY-MM-DD."
     return True, None
 
-# Embedded HTML Template
+
 HTML_TEMPLATE = """
 <!DOCTYPE html>
 <html lang="en">
@@ -76,97 +89,88 @@ HTML_TEMPLATE = """
 </html>
 """
 
-# API Endpoints
+
 @app.route("/")
 def index():
-    with sqlite3.connect(DB_FILE) as conn:
-        cursor = conn.cursor()
-        cursor.execute("SELECT * FROM transactions")
-        transactions = cursor.fetchall()
-        cursor.execute("SELECT * FROM budgets")
-        budgets = cursor.fetchall()
+    """Home page displaying transactions and budgets."""
+    transactions = execute_query("SELECT * FROM transactions", fetch=True)
+    budgets = execute_query("SELECT * FROM budgets", fetch=True)
     return render_template_string(HTML_TEMPLATE, transactions=transactions, budgets=budgets)
+
 
 @app.route("/transactions", methods=["POST"])
 def add_transaction():
+    """Add a new transaction."""
     data = request.json
     valid, error = validate_transaction(data)
     if not valid:
         return jsonify({"error": error}), 400
-
-    with sqlite3.connect(DB_FILE) as conn:
-        cursor = conn.cursor()
-        cursor.execute("""
+    execute_query("""
         INSERT INTO transactions (amount, category, date, description)
         VALUES (?, ?, ?, ?)
         """, (data["amount"], data["category"], data["date"], data.get("description")))
-        conn.commit()
     return jsonify({"message": "Transaction added"}), 201
+
 
 @app.route("/transactions", methods=["GET"])
 def get_transactions():
-    with sqlite3.connect(DB_FILE) as conn:
-        cursor = conn.cursor()
-        cursor.execute("SELECT * FROM transactions")
-        transactions = cursor.fetchall()
+    """Retrieve all transactions."""
+    transactions = execute_query("SELECT * FROM transactions", fetch=True)
     return jsonify(transactions)
+
 
 @app.route("/transactions/<int:transaction_id>", methods=["DELETE"])
 def delete_transaction(transaction_id):
-    with sqlite3.connect(DB_FILE) as conn:
-        cursor = conn.cursor()
-        cursor.execute("DELETE FROM transactions WHERE id = ?", (transaction_id,))
-        conn.commit()
+    """Delete a transaction by ID."""
+    execute_query("DELETE FROM transactions WHERE id = ?", (transaction_id,))
     return jsonify({"message": "Transaction deleted"}), 200
+
 
 @app.route("/budgets", methods=["POST"])
 def add_budget():
+    """Add or update a budget."""
     data = request.json
     if "category" not in data or "budget_limit" not in data:
         return jsonify({"error": "Missing required fields"}), 400
-
-    with sqlite3.connect(DB_FILE) as conn:
-        cursor = conn.cursor()
-        cursor.execute("""
+    execute_query("""
         INSERT OR REPLACE INTO budgets (category, budget_limit)
         VALUES (?, ?)
         """, (data["category"], data["budget_limit"]))
-        conn.commit()
     return jsonify({"message": "Budget added/updated"}), 201
+
 
 @app.route("/budgets", methods=["GET"])
 def get_budgets():
-    with sqlite3.connect(DB_FILE) as conn:
-        cursor = conn.cursor()
-        cursor.execute("SELECT * FROM budgets")
-        budgets = cursor.fetchall()
+    """Retrieve all budgets."""
+    budgets = execute_query("SELECT * FROM budgets", fetch=True)
     return jsonify(budgets)
+
 
 @app.route("/budgets/check", methods=["GET"])
 def check_budgets():
-    budget_status = {}
-    with sqlite3.connect(DB_FILE) as conn:
-        cursor = conn.cursor()
-        cursor.execute("""
+    """Check spending against budgets."""
+    query = """
         SELECT budgets.category, budgets.budget_limit, COALESCE(SUM(transactions.amount), 0)
         FROM budgets
         LEFT JOIN transactions ON budgets.category = transactions.category
         GROUP BY budgets.category
-        """)
-        for row in cursor.fetchall():
-            category, limit, spent = row
-            budget_status[category] = {"limit": limit, "spent": spent, "remaining": limit - spent}
-
+    """
+    budget_status = {}
+    for row in execute_query(query, fetch=True):
+        category, limit, spent = row
+        budget_status[category] = {"limit": limit, "spent": spent, "remaining": limit - spent}
     return jsonify(budget_status)
+
 
 @app.route("/generate_report", methods=["GET"])
 def generate_report():
-    with sqlite3.connect(DB_FILE) as conn:
-        cursor = conn.cursor()
-        cursor.execute("""
+    """Generate a spending report."""
+    transactions = execute_query("""
         SELECT category, SUM(amount) FROM transactions GROUP BY category
-        """)
-        category_totals = {row[0]: row[1] for row in cursor.fetchall()}
+    """, fetch=True)
+    category_totals = {row[0]: row[1] for row in transactions}
+    if not category_totals:
+        return jsonify({"message": "No data to generate report"}), 200
 
     # Generate Pie Chart
     categories = list(category_totals.keys())
@@ -177,6 +181,7 @@ def generate_report():
     plt.savefig("report.png")
 
     return jsonify({"message": "Report generated: report.png"})
+
 
 if __name__ == "__main__":
     app.run(debug=True)
