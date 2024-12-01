@@ -43,7 +43,7 @@ def validate_transaction(data):
         return False, "Invalid date format. Use YYYY-MM-DD."
     return True, None
 
-# Embedded HTML and CSS Template
+# Embedded HTML Template
 HTML_TEMPLATE = """
 <!DOCTYPE html>
 <html lang="en">
@@ -51,79 +51,27 @@ HTML_TEMPLATE = """
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Personal Finance Tracker</title>
-    <style>
-        body {
-            font-family: Arial, sans-serif;
-            margin: 0;
-            padding: 0;
-            background-color: #f8f9fa;
-            color: #333;
-        }
-        header {
-            background-color: #007bff;
-            color: #fff;
-            padding: 20px;
-            text-align: center;
-        }
-        main {
-            padding: 20px;
-            max-width: 800px;
-            margin: 20px auto;
-            background: #fff;
-            border-radius: 10px;
-            box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
-        }
-        h1, h2 {
-            color: #007bff;
-        }
-        ul {
-            list-style-type: none;
-            padding: 0;
-        }
-        li {
-            margin: 10px 0;
-            padding: 10px;
-            background: #f1f1f1;
-            border-radius: 5px;
-        }
-        a {
-            display: inline-block;
-            margin-top: 20px;
-            padding: 10px 20px;
-            text-decoration: none;
-            color: #fff;
-            background: #007bff;
-            border-radius: 5px;
-        }
-        a:hover {
-            background: #0056b3;
-        }
-    </style>
 </head>
 <body>
-    <header>
-        <h1>Personal Finance Tracker</h1>
-    </header>
-    <main>
-        <h2>Transactions</h2>
-        <ul>
-            {% for transaction in transactions %}
-            <li>
-                <strong>${{ transaction[1] }}</strong> ({{ transaction[2] }}) on {{ transaction[3] }}
-                {% if transaction[4] %}
-                - {{ transaction[4] }}
-                {% endif %}
-            </li>
-            {% endfor %}
-        </ul>
-        <h2>Budgets</h2>
-        <ul>
-            {% for budget in budgets %}
-            <li>{{ budget[1] }}: ${{ budget[2] }} limit</li>
-            {% endfor %}
-        </ul>
-        <a href="/generate_report">Generate Report</a>
-    </main>
+    <h1>Personal Finance Tracker</h1>
+    <h2>Transactions</h2>
+    <ul>
+        {% for transaction in transactions %}
+        <li>
+            <strong>${{ transaction[1] }}</strong> ({{ transaction[2] }}) on {{ transaction[3] }}
+            {% if transaction[4] %}
+            - {{ transaction[4] }}
+            {% endif %}
+        </li>
+        {% endfor %}
+    </ul>
+    <h2>Budgets</h2>
+    <ul>
+        {% for budget in budgets %}
+        <li>{{ budget[1] }}: ${{ budget[2] }} limit</li>
+        {% endfor %}
+    </ul>
+    <a href="/generate_report">Generate Report</a>
 </body>
 </html>
 """
@@ -155,6 +103,22 @@ def add_transaction():
         conn.commit()
     return jsonify({"message": "Transaction added"}), 201
 
+@app.route("/transactions", methods=["GET"])
+def get_transactions():
+    with sqlite3.connect(DB_FILE) as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM transactions")
+        transactions = cursor.fetchall()
+    return jsonify(transactions)
+
+@app.route("/transactions/<int:transaction_id>", methods=["DELETE"])
+def delete_transaction(transaction_id):
+    with sqlite3.connect(DB_FILE) as conn:
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM transactions WHERE id = ?", (transaction_id,))
+        conn.commit()
+    return jsonify({"message": "Transaction deleted"}), 200
+
 @app.route("/budgets", methods=["POST"])
 def add_budget():
     data = request.json
@@ -169,6 +133,31 @@ def add_budget():
         """, (data["category"], data["budget_limit"]))
         conn.commit()
     return jsonify({"message": "Budget added/updated"}), 201
+
+@app.route("/budgets", methods=["GET"])
+def get_budgets():
+    with sqlite3.connect(DB_FILE) as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM budgets")
+        budgets = cursor.fetchall()
+    return jsonify(budgets)
+
+@app.route("/budgets/check", methods=["GET"])
+def check_budgets():
+    budget_status = {}
+    with sqlite3.connect(DB_FILE) as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+        SELECT budgets.category, budgets.budget_limit, COALESCE(SUM(transactions.amount), 0)
+        FROM budgets
+        LEFT JOIN transactions ON budgets.category = transactions.category
+        GROUP BY budgets.category
+        """)
+        for row in cursor.fetchall():
+            category, limit, spent = row
+            budget_status[category] = {"limit": limit, "spent": spent, "remaining": limit - spent}
+
+    return jsonify(budget_status)
 
 @app.route("/generate_report", methods=["GET"])
 def generate_report():
